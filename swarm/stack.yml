@@ -1,0 +1,61 @@
+# Docker Swarm deployment template (Tasks 6 and 7)
+# Deploy with:   docker stack deploy -c swarm/stack.yml tempconverter
+#
+# Requirement 6a: the app is published on port 80 through Swarm's ingress
+#                 ROUTING MESH, which load-balances requests across all
+#                 healthy app replicas on every node in the cluster.
+# Requirement 6b: 1x database replica, 2x app replicas,
+#                 max_replicas_per_node: 1 guarantees the app replicas land
+#                 on DIFFERENT nodes.
+# Requirement 6c: scale to 3 replicas with:
+#                 docker service scale tempconverter_app=3
+
+version: "3.8"
+
+services:
+  db:
+    image: docker.io/library/mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: RootPass123
+      MYSQL_DATABASE: tempconverter
+      MYSQL_USER: tempuser            # non-root DB user the app connects as
+      MYSQL_PASSWORD: TempUserPass123
+    volumes:
+      - db-data:/var/lib/mysql
+    networks:
+      - backend
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager      # keep the DB (and its volume) on a known node
+
+  app:
+    image: docker.io/ivan123895okr/tempconverter:latest
+    environment:
+      DB_USER: tempuser
+      DB_PASS: TempUserPass123
+      DB_HOST: db                     # service name = DNS name on the overlay network
+      DB_NAME: tempconverter
+      STUDENT: "Ivan"
+      COLLEGE: "Algebra Bernays University"
+    networks:
+      - backend
+    ports:
+      - target: 5000
+        published: 80                 # exposed to the outside world on port 80
+        protocol: tcp
+        mode: ingress                 # routing mesh = built-in load balancer
+    deploy:
+      replicas: 2
+      placement:
+        max_replicas_per_node: 1      # replicas must NOT share a node
+      restart_policy:
+        condition: on-failure         # retries until MySQL is ready on first boot
+
+networks:
+  backend:
+    driver: overlay
+
+volumes:
+  db-data:

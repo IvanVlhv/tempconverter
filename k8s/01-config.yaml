@@ -1,0 +1,24 @@
+# Non-sensitive configuration for the application and the database.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempconverter-config
+  namespace: tempconverter
+data:
+  DB_HOST: "db"                      # = name of the MySQL Service (cluster DNS)
+  DB_NAME: "tempconverter"
+  STUDENT: "Ivan"
+  COLLEGE: "Algebra Bernays University"
+---
+# Credentials. The application connects to MySQL as the NON-ROOT user
+# "tempuser"; the root password exists only so the mysql image can initialise.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tempconverter-db-credentials
+  namespace: tempconverter
+type: Opaque
+stringData:
+  DB_USER: "tempuser"
+  DB_PASS: "TempUserPass123"
+  MYSQL_ROOT_PASSWORD: "RootPass123"

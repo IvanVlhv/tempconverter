@@ -1,0 +1,89 @@
+# Persistent storage for MySQL data.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  namespace: tempconverter
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+# Requirement 6b: exactly ONE instance of the database container.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: tempconverter
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate                    # never two writers on the same volume
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      # minikube's default hostPath storage provisioner creates the volume on
+      # the primary node, so the DB pod is pinned there. In a real cluster a
+      # CSI driver / StatefulSet would be used instead.
+      nodeSelector:
+        kubernetes.io/hostname: minikube
+      containers:
+        - name: mysql
+          image: docker.io/library/mysql:8
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_DATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: tempconverter-config
+                  key: DB_NAME
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tempconverter-db-credentials
+                  key: DB_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tempconverter-db-credentials
+                  key: DB_PASS
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tempconverter-db-credentials
+                  key: MYSQL_ROOT_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-data
+---
+# Stable in-cluster DNS name "db" for the database.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  namespace: tempconverter
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306

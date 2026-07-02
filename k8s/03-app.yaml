@@ -1,0 +1,83 @@
+# Requirement 6b: TWO instances of the tempconverter app, and the required
+# podAntiAffinity below forbids two app pods on the same node.
+# Requirement 6c: scale to three replicas with
+#   kubectl -n tempconverter scale deployment/tempconverter --replicas=3
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempconverter
+  namespace: tempconverter
+  labels:
+    app: tempconverter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tempconverter
+  template:
+    metadata:
+      labels:
+        app: tempconverter
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: tempconverter
+              topologyKey: kubernetes.io/hostname   # replicas on DIFFERENT nodes
+      initContainers:
+        # The app crashes if MySQL is not reachable at import time
+        # (db.create_all), so we wait for the DB port before starting it.
+        - name: wait-for-db
+          image: busybox:1.36
+          command: ['sh', '-c', 'until nc -z db 3306; do echo "waiting for db"; sleep 2; done']
+      containers:
+        - name: tempconverter
+          image: docker.io/ivan123895okr/tempconverter:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tempconverter-db-credentials
+                  key: DB_USER
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: tempconverter-db-credentials
+                  key: DB_PASS
+          envFrom:
+            - configMapRef:
+                name: tempconverter-config
+          readinessProbe:              # page render includes a DB query
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+---
+# ClusterIP service in front of the app pods (load-balances between replicas).
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempconverter
+  namespace: tempconverter
+spec:
+  selector:
+    app: tempconverter
+  ports:
+    - port: 80
+      targetPort: 5000
